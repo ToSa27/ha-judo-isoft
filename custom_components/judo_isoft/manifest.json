@@ -1,0 +1,12 @@
+{
+  "domain": "judo_isoft",
+  "name": "Judo i-Soft",
+  "codeowners": [
+    "@ToSa27"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/ToSa27/ha-judo-isoft",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ToSa27/ha-judo-isoft/issues",
+  "version": "0.1.0"
+}
