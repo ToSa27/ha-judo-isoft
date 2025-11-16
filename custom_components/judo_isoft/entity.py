@@ -1,4 +1,4 @@
-"""BlueprintEntity class."""
+"""JudoISoftEntity class."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .coordinator import JudoISoftDataUpdateCoordinator
 
 
 class JudoISoftEntity(CoordinatorEntity[JudoISoftDataUpdateCoordinator]):
-    """BlueprintEntity class."""
+    """JudoISoftEntity class."""
 
     _attr_attribution = ATTRIBUTION
 

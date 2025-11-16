@@ -18,7 +18,7 @@ type JudoISoftConfigEntry = ConfigEntry[JudoISoftData]
 
 @dataclass
 class JudoISoftData:
-    """Data for the Blueprint integration."""
+    """Data for the Judo iSoft integration."""
 
     client: JudoISoftApiClient
     coordinator: JudoISoftDataUpdateCoordinator

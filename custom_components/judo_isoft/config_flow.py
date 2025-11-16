@@ -1,4 +1,4 @@
-"""Adds config flow for Blueprint."""
+"""Adds config flow for Judo i-Soft Safe+."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from .const import DOMAIN, LOGGER
 
 
 class JudoISoftFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow for Blueprint."""
+    """Config flow for Judo i-Soft Safe+."""
 
     VERSION = 1
 

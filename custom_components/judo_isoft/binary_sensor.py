@@ -21,9 +21,15 @@ if TYPE_CHECKING:
 
 ENTITY_DESCRIPTIONS = (
     BinarySensorEntityDescription(
-        key="judo_isoft",
-        name="Judo i-Soft Binary Sensor",
-        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        key="valve",
+        name="Valve",
+        icon="mdi:valve",
+        device_class=BinarySensorDeviceClass.OPENING,
+    ),
+    BinarySensorEntityDescription(
+        key="vacation",
+        name="Vacation",
+        icon="mdi:beach",
     ),
 )
 
@@ -35,7 +41,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the binary_sensor platform."""
     async_add_entities(
-        IntegrationBlueprintBinarySensor(
+        JudoISoftBinarySensor(
             coordinator=entry.runtime_data.coordinator,
             entity_description=entity_description,
         )
@@ -43,7 +49,7 @@ async def async_setup_entry(
     )
 
 
-class IntegrationBlueprintBinarySensor(JudoISoftEntity, BinarySensorEntity):
+class JudoISoftBinarySensor(JudoISoftEntity, BinarySensorEntity):
     """judo_isoft binary_sensor class."""
 
     def __init__(
@@ -54,8 +60,9 @@ class IntegrationBlueprintBinarySensor(JudoISoftEntity, BinarySensorEntity):
         """Initialize the binary_sensor class."""
         super().__init__(coordinator)
         self.entity_description = entity_description
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{entity_description.key}"
 
     @property
     def is_on(self) -> bool:
         """Return true if the binary_sensor is on."""
-        return self.coordinator.data.get("title", "") == "foo"
+        return self.coordinator.data.get(self.entity_description.key)
