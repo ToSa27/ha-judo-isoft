@@ -9,17 +9,17 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.loader import Integration
 
-    from .api import IntegrationBlueprintApiClient
-    from .coordinator import BlueprintDataUpdateCoordinator
+    from .api import JudoISoftApiClient
+    from .coordinator import JudoISoftDataUpdateCoordinator
 
 
-type IntegrationBlueprintConfigEntry = ConfigEntry[IntegrationBlueprintData]
+type JudoISoftConfigEntry = ConfigEntry[JudoISoftData]
 
 
 @dataclass
-class IntegrationBlueprintData:
+class JudoISoftData:
     """Data for the Blueprint integration."""
 
-    client: IntegrationBlueprintApiClient
-    coordinator: BlueprintDataUpdateCoordinator
+    client: JudoISoftApiClient
+    coordinator: JudoISoftDataUpdateCoordinator
     integration: Integration

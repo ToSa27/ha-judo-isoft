@@ -4,6 +4,7 @@
             "user": {
                 "description": "If you need help with the configuration have a look here: https://github.com/ToSa27/ha-judo-isoft",
                 "data": {
+                    "ip_address": "IP Address",
                     "username": "Username",
                     "password": "Password"
                 }

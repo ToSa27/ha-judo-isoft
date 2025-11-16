@@ -1,0 +1,22 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "description": "Hilfe bei der Konfiguration: https://github.com/ToSa27/ha-judo-isoft",
+                "data": {
+                    "ip_address": "IP Addresse",
+                    "username": "Benutzername",
+                    "password": "Passwort"
+                }
+            }
+        },
+        "error": {
+            "auth": "Benutzername/Passwort ist falsch.",
+            "connection": "Verbindung nicht erfolgreich.",
+            "unknown": "Unbekannter Fehler."
+        },
+        "abort": {
+            "already_configured": "Dieser Eintrag ist bereits konfiguriert."
+        }
+    }
+}

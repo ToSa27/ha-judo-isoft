@@ -9,18 +9,18 @@ import aiohttp
 import async_timeout
 
 
-class IntegrationBlueprintApiClientError(Exception):
+class JudoISoftApiClientError(Exception):
     """Exception to indicate a general API error."""
 
 
-class IntegrationBlueprintApiClientCommunicationError(
-    IntegrationBlueprintApiClientError,
+class JudoISoftApiClientCommunicationError(
+    JudoISoftApiClientError,
 ):
     """Exception to indicate a communication error."""
 
 
-class IntegrationBlueprintApiClientAuthenticationError(
-    IntegrationBlueprintApiClientError,
+class JudoISoftApiClientAuthenticationError(
+    JudoISoftApiClientError,
 ):
     """Exception to indicate an authentication error."""
 
@@ -29,22 +29,24 @@ def _verify_response_or_raise(response: aiohttp.ClientResponse) -> None:
     """Verify that the response is valid."""
     if response.status in (401, 403):
         msg = "Invalid credentials"
-        raise IntegrationBlueprintApiClientAuthenticationError(
+        raise JudoISoftApiClientAuthenticationError(
             msg,
         )
     response.raise_for_status()
 
 
-class IntegrationBlueprintApiClient:
+class JudoISoftApiClient:
     """Sample API Client."""
 
     def __init__(
         self,
+        ip: str,
         username: str,
         password: str,
         session: aiohttp.ClientSession,
     ) -> None:
         """Sample API Client."""
+        self._ip = ip
         self._username = username
         self._password = password
         self._session = session
@@ -86,16 +88,16 @@ class IntegrationBlueprintApiClient:
 
         except TimeoutError as exception:
             msg = f"Timeout error fetching information - {exception}"
-            raise IntegrationBlueprintApiClientCommunicationError(
+            raise JudoISoftApiClientCommunicationError(
                 msg,
             ) from exception
         except (aiohttp.ClientError, socket.gaierror) as exception:
             msg = f"Error fetching information - {exception}"
-            raise IntegrationBlueprintApiClientCommunicationError(
+            raise JudoISoftApiClientCommunicationError(
                 msg,
             ) from exception
         except Exception as exception:  # pylint: disable=broad-except
             msg = f"Something really wrong happened! - {exception}"
-            raise IntegrationBlueprintApiClientError(
+            raise JudoISoftApiClientError(
                 msg,
             ) from exception
