@@ -26,3 +26,25 @@ class JudoISoftEntity(CoordinatorEntity[JudoISoftDataUpdateCoordinator]):
                 ),
             },
         )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | bool | None] | None:
+        """Expose freshness for measurements without changing their state type."""
+        description = self.entity_description
+        if description is None or description.key not in {
+            "water_total_raw",
+            "water_total_soft",
+            "valve",
+            "vacation",
+        }:
+            return None
+        data = self.coordinator.data or {}
+        last_success = data.get("last_success", {}).get(description.key)
+        return {
+            "last_success": last_success,
+            "stale": (
+                last_success is None
+                or not self.coordinator.last_update_success
+                or description.key in data.get("stale_fields", ())
+            ),
+        }
