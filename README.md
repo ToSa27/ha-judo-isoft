@@ -16,4 +16,10 @@ operation, not request URLs, tokens or response bodies.
 
 ## Offline tests
 
-With the project dependencies installed, run `python -m unittest discover -s tests -v`.
+In a fresh Python 3.13 virtual environment, install the same dependencies as CI
+and run the offline tests:
+
+```sh
+python -m pip install -r .github/requirements-ci.txt
+python -m unittest discover -s tests -v
+```

@@ -1,0 +1,4 @@
+# The offline API tests exercise aiohttp without importing Home Assistant.
+# Match the aiohttp version pinned by the development Home Assistant release.
+aiohttp==3.13.2
+ruff==0.14.4
