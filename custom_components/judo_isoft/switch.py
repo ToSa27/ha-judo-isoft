@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription, SwitchDeviceClass
+from homeassistant.components.switch import (
+    SwitchDeviceClass,
+    SwitchEntity,
+    SwitchEntityDescription,
+)
 
 from .entity import JudoISoftEntity
 
@@ -57,7 +61,9 @@ class JudoISoftSwitch(JudoISoftEntity, SwitchEntity):
         """Initialize the switch class."""
         super().__init__(coordinator)
         self.entity_description = entity_description
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{entity_description.key}"
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_{entity_description.key}"
+        )
 
     @property
     def is_on(self) -> bool:
@@ -66,10 +72,14 @@ class JudoISoftSwitch(JudoISoftEntity, SwitchEntity):
 
     async def async_turn_on(self, **_: Any) -> None:
         """Turn on the switch."""
-        await self.coordinator.config_entry.runtime_data.client.async_set(self.entity_description.key, 1)
+        await self.coordinator.config_entry.runtime_data.client.async_set(
+            self.entity_description.key, 1
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **_: Any) -> None:
         """Turn off the switch."""
-        await self.coordinator.config_entry.runtime_data.client.async_set(self.entity_description.key, 0)
+        await self.coordinator.config_entry.runtime_data.client.async_set(
+            self.entity_description.key, 0
+        )
         await self.coordinator.async_request_refresh()
