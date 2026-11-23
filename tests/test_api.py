@@ -8,6 +8,7 @@ import asyncio
 import importlib
 import sys
 import unittest
+from datetime import date
 from http import HTTPStatus
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -366,3 +367,76 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                 new_client._get = AsyncMock(side_effect=read)  # noqa: SLF001
                 unknown = await new_client.async_get_data(include_extended=True)
                 self.assertNotIn("regeneration", unknown)
+
+    async def test_calendar_consumption_buckets(self) -> None:
+        """Sum verified day/month bucket layouts, without reusing a previous period."""
+        daily = "10 11 12 -1 0 -1 -1 -1"
+        monthly = " ".join(["33", "0", *(["-1"] * 26)])
+        responses = {
+            "water total": "      1      2",
+            "valve": "opened",
+            "vacation": "0",
+        }
+
+        async def read(_group: str, command: str, _params: dict | None = None) -> str:
+            return {"water daily": daily, "water monthly": monthly}.get(
+                command, responses.get(command, "unavailable")
+            )
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        get = AsyncMock(side_effect=read)
+        client._get = get  # noqa: SLF001
+        first = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 2, 2)
+        )
+        self.assertEqual(first["water_today"], 33)
+        self.assertEqual(first["water_this_month"], 33)
+        get.assert_any_await(
+            "consumption", "water daily", {"year": 2026, "month": 2, "day": 2}
+        )
+        get.assert_any_await("consumption", "water monthly", {"year": 2026, "month": 2})
+
+        daily = "-1 -1 -1 -1 -1 -1 -1 -1"
+        monthly = "unexpected"
+        next_day = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 2, 3)
+        )
+        self.assertNotIn("water_today", next_day)
+        self.assertEqual(next_day["water_this_month"], 33)
+        self.assertIn("water_this_month", next_day["stale_fields"])
+        next_month = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 3, 1)
+        )
+        self.assertNotIn("water_this_month", next_month)
+
+        daily = "0 -1 -1 -1 -1 -1 -1 -1"
+        monthly = "0 " * 30  # Not a valid 31-day March reply.
+        final = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 3, 1)
+        )
+        self.assertEqual(final["water_today"], 0)
+        self.assertNotIn("water_this_month", final)
+
+    async def test_consumption_poll_crossing_month_boundary(self) -> None:
+        """Do not publish old period totals when midnight passes mid-poll."""
+        before, after = date(2026, 2, 28), date(2026, 3, 1)
+        today = before
+        reads = {"water total": "      1      2", "valve": "opened", "vacation": "0"}
+
+        async def read(_group: str, command: str, _params: dict | None = None) -> str:
+            nonlocal today
+            if command == "water daily":
+                return "1 2 3 4 5 6 7 8"
+            if command == "water monthly":
+                today = after
+                return "1 " * 28
+            return reads.get(command, "unavailable")
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        client._get = AsyncMock(side_effect=read)  # noqa: SLF001
+        snapshot = await client.async_get_data(
+            include_extended=True, local_date=lambda: today
+        )
+        self.assertNotIn("water_today", snapshot)
+        self.assertNotIn("water_this_month", snapshot)
+        self.assertEqual(snapshot["water_total_soft"], 2)

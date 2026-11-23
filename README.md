@@ -25,10 +25,19 @@ read at every regular refresh (normally hourly). Flow and regeneration are snaps
 not continuous monitoring. The integration only reads the regeneration status; it does
 not start or stop a regeneration.
 
-Residual capacity uses the percentage explicitly provided by the API. Salt range,
-salt quantity, flow rate and hardness are shown as raw integers without guessed units until
-the values can be matched to the appliance display. Firmware revisions that do not
+Residual capacity is shown in percent; raw and residual water hardness are shown
+in degrees of German hardness (`°dH`). Salt range, salt quantity and flow rate are
+shown as raw integers until their units can be verified. Firmware revisions that do not
 return a recognized value leave the sensor unknown, or stale if previously read.
+
+Today's and this month's consumption are read in litres from the device's history
+at each regular refresh, using Home Assistant's local calendar. The eight daily
+buckets and the month's per-day buckets are summed, skipping `-1` (missing data).
+An all-missing reply leaves the last value for that same period stale, or unknown if
+no valid value exists; it is not zero. At a calendar change, a value from the
+previous day/month is not carried over under the new period's name. Make sure the
+JUDO and Home Assistant use the same local date. Period totals are display sensors;
+use the existing lifetime counter for Home Assistant long-term consumption statistics.
 
 ## Offline tests
 

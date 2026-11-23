@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     JudoISoftApiClientAuthenticationError,
@@ -25,8 +26,10 @@ class JudoISoftDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Any:
         """Update data via library."""
         try:
+            regular_poll = self.data is not None
             return await self.config_entry.runtime_data.client.async_get_data(
-                include_extended=self.data is not None,
+                include_extended=regular_poll,
+                local_date=(lambda: dt_util.now().date()) if regular_poll else None,
             )
         except JudoISoftApiClientAuthenticationError as exception:
             raise ConfigEntryAuthFailed(exception) from exception

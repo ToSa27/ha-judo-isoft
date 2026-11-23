@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from .data import JudoISoftConfigEntry
 
 
+_HARDNESS_UNIT = "°dH"
+
 ENTITY_DESCRIPTIONS = (
     SensorEntityDescription(
         key="water_total_raw",
@@ -38,6 +40,20 @@ ENTITY_DESCRIPTIONS = (
         native_unit_of_measurement=UnitOfVolume.LITERS,
         device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL_INCREASING,
+    ),
+    SensorEntityDescription(
+        key="water_today",
+        name="Water Today",
+        icon="mdi:water",
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        device_class=SensorDeviceClass.WATER,
+    ),
+    SensorEntityDescription(
+        key="water_this_month",
+        name="Water This Month",
+        icon="mdi:water",
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        device_class=SensorDeviceClass.WATER,
     ),
     SensorEntityDescription(
         key="salt_range",
@@ -60,11 +76,13 @@ ENTITY_DESCRIPTIONS = (
         key="natural_hardness",
         name="Raw Water Hardness",
         icon="mdi:water",
+        native_unit_of_measurement=_HARDNESS_UNIT,
     ),
     SensorEntityDescription(
         key="residual_hardness",
         name="Residual Hardness",
         icon="mdi:water-check",
+        native_unit_of_measurement=_HARDNESS_UNIT,
     ),
     SensorEntityDescription(
         key="actual_flow_rate",

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import UTC, datetime
 from http import HTTPStatus
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+    from datetime import date
 
 import asyncio
 import ssl
@@ -63,11 +65,18 @@ _EXTENDED_READS = (
     ("settings", "residual hardness", ("residual_hardness",), _DAILY_INTERVAL),
     ("settings", "regeneration", ("regeneration",), 0),
 )
+_PERIOD_READS = (
+    ("consumption", "water daily", ("water_today",), 0),
+    ("consumption", "water monthly", ("water_this_month",), 0),
+)
+_DAILY_BUCKETS = 8
 _EXTENDED_COMMANDS = frozenset(
-    (group, command) for group, command, _, _ in _EXTENDED_READS
+    (group, command) for group, command, _, _ in (*_EXTENDED_READS, *_PERIOD_READS)
 )
 MEASUREMENT_FIELDS = frozenset(
-    field for _, _, fields, _ in (*_BASE_READS, *_EXTENDED_READS) for field in fields
+    field
+    for _, _, fields, _ in (*_BASE_READS, *_EXTENDED_READS, *_PERIOD_READS)
+    for field in fields
 )
 
 
@@ -106,10 +115,36 @@ class JudoISoftApiClient:
         self._last_success: dict[str, str] = {}
         self._next_read: dict[str, float] = {}
         self._stale_fields: set[str] = set()
+        self._period_start: dict[str, date] = {}
 
-    async def async_get_data(self, *, include_extended: bool = False) -> dict[str, Any]:
+    async def async_get_data(
+        self,
+        *,
+        include_extended: bool = False,
+        local_date: Callable[[], date] | None = None,
+    ) -> dict[str, Any]:
         """Poll independently, retaining the values that could not be refreshed."""
         reads = (*_BASE_READS, *_EXTENDED_READS) if include_extended else _BASE_READS
+        history: dict[str, tuple[dict[str, int], int]] = {}
+        if include_extended and local_date is not None:
+            consumption_date = local_date()
+            reads += _PERIOD_READS
+            year, month, day = (
+                consumption_date.year,
+                consumption_date.month,
+                consumption_date.day,
+            )
+            history = {
+                "water daily": (
+                    {"year": year, "month": month, "day": day},
+                    _DAILY_BUCKETS,
+                ),
+                "water monthly": (
+                    {"year": year, "month": month},
+                    monthrange(year, month)[1],
+                ),
+            }
+            self._reset_old_periods(consumption_date)
         now = perf_counter()
         due = [read for read in reads if now >= self._next_read.get(read[1], now)]
         for _, _, fields, _ in due:
@@ -119,8 +154,13 @@ class JudoISoftApiClient:
             if interval:
                 self._next_read[command] = perf_counter() + interval
             try:
-                result = await self._get(group, command)
-                values = self._parse_values(command, result)
+                if command in history:
+                    params, buckets = history[command]
+                    result = await self._get(group, command, params)
+                    values = (self._sum_buckets(result, buckets),)
+                else:
+                    result = await self._get(group, command)
+                    values = self._parse_values(command, result)
             except JudoISoftApiClientAuthenticationError:
                 raise
             except _JudoSessionSetupError:
@@ -135,6 +175,10 @@ class JudoISoftApiClient:
                 self._last_success[field] = timestamp
                 self._stale_fields.discard(field)
 
+        # Do not publish a previous period if midnight passed during the HTTP reads.
+        if history and local_date is not None:
+            self._reset_old_periods(local_date())
+
         if not self._values:
             msg = "JUDO did not return any valid measurements"
             raise JudoISoftApiClientCommunicationError(msg)
@@ -146,6 +190,33 @@ class JudoISoftApiClient:
             "last_success": self._last_success.copy(),
             "stale_fields": self._values.keys() & self._stale_fields,
         }
+
+    def _reset_old_periods(self, today: date) -> None:
+        for field, start in (
+            ("water_today", today),
+            ("water_this_month", today.replace(day=1)),
+        ):
+            if self._period_start.get(field) != start:
+                self._values.pop(field, None)
+                self._last_success.pop(field, None)
+                self._period_start[field] = start
+
+    @staticmethod
+    def _sum_buckets(value: Any, expected: int) -> int:
+        parts = value.split() if isinstance(value, str) else []
+        msg = "Unrecognized JUDO consumption history"
+        if len(parts) != expected:
+            raise ValueError(msg)
+        samples = []
+        for part in parts:
+            if part == "-1":  # No sample in the appliance's history file.
+                continue
+            if not (part.isascii() and part.isdecimal()):
+                raise ValueError(msg)
+            samples.append(int(part))
+        if not samples:
+            raise ValueError(msg)
+        return sum(samples)
 
     @staticmethod
     def _parse_values(command: str, value: Any) -> tuple[int | bool, ...]:
