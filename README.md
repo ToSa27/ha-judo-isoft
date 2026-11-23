@@ -15,16 +15,18 @@ A value that has never been read is unknown; the cache does not survive a restar
 Timed-out requests are not immediately repeated. Debug logs report elapsed time by
 operation, not request URLs, tokens or response bodies.
 
-## Extra consumption sensors
+## Extra telemetry sensors
 
 The first refresh keeps the original three requests; the extra read-only sensors
-are queried starting with the next regular refresh. Salt range and salt quantity
-are attempted at most once every 24 hours per integration load. Residual capacity
-and current flow rate are read at every regular refresh (normally hourly). A flow
-reading is a snapshot, not continuous monitoring.
+are queried starting with the next regular refresh. Salt range, salt quantity, raw
+water hardness and residual hardness are attempted at most once every 24 hours per
+integration load. Residual capacity, current flow rate and regeneration status are
+read at every regular refresh (normally hourly). Flow and regeneration are snapshots,
+not continuous monitoring. The integration only reads the regeneration status; it does
+not start or stop a regeneration.
 
 Residual capacity uses the percentage explicitly provided by the API. Salt range,
-salt quantity and flow rate are shown as raw integers without guessed units until
+salt quantity, flow rate and hardness are shown as raw integers without guessed units until
 the values can be matched to the appliance display. Firmware revisions that do not
 return a recognized value leave the sensor unknown, or stale if previously read.
 

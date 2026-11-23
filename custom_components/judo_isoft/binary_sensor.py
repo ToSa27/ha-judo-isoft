@@ -27,6 +27,12 @@ ENTITY_DESCRIPTIONS = (
         device_class=BinarySensorDeviceClass.OPENING,
     ),
     BinarySensorEntityDescription(
+        key="regeneration",
+        name="Regeneration Active",
+        icon="mdi:water-sync",
+        device_class=BinarySensorDeviceClass.RUNNING,
+    ),
+    BinarySensorEntityDescription(
         key="vacation",
         name="Vacation",
         icon="mdi:beach",
@@ -65,6 +71,6 @@ class JudoISoftBinarySensor(JudoISoftEntity, BinarySensorEntity):
         )
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return true if the binary_sensor is on."""
         return self.coordinator.data.get(self.entity_description.key)

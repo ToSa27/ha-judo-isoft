@@ -216,6 +216,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             "salt quantity": 12,
             "residual capacity": "123, 90%",
             "actual flow rate": "0",
+            "natural hardness": "23",
+            "residual hardness": "8",
+            "regeneration": "192, lso, lsu",
         }
 
         async def read(_group: str, command: str) -> str | int:
@@ -226,7 +229,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         client._get = get  # noqa: SLF001
         with patch.object(api, "perf_counter", return_value=10) as clock:
             first = await client.async_get_data(include_extended=True)
-            self.assertEqual(get.await_count, 7)
+            self.assertEqual(get.await_count, 10)
             self.assertEqual(first["salt_range"], 229)
             self.assertEqual(first["salt_quantity"], 12)
             self.assertEqual(first["residual_capacity"], 90)
@@ -242,6 +245,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                     "vacation",
                     "residual capacity",
                     "actual flow rate",
+                    "regeneration",
                 ],
             )
             self.assertEqual(
@@ -253,7 +257,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             clock.return_value += 86400
             responses["salt range"] = "unavailable"
             third = await client.async_get_data(include_extended=True)
-            self.assertEqual(get.await_count, 7)
+            self.assertEqual(get.await_count, 10)
             self.assertEqual(third["salt_range"], 229)
             self.assertIn("salt_range", third["stale_fields"])
             clock.return_value += 3601
@@ -273,6 +277,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             {"status": "ok", "data": "12"},
             {"status": "ok", "data": "123, 90%"},
             {"status": "ok", "data": "0"},
+            {"status": "ok", "data": "23"},
+            {"status": "ok", "data": "8"},
+            {"status": "ok", "data": "192, lso, lsu"},
         ]
         session = MagicMock()
         responses = []
@@ -296,3 +303,66 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["residual_capacity"], 90)
         self.assertEqual(snapshot["actual_flow_rate"], 0)
         self.assertEqual(session.get.call_count, len(payloads))
+
+    async def test_read_only_hardness_and_regeneration(self) -> None:
+        """Use the firmware's read commands and decode its regeneration frames."""
+        responses = {
+            ("consumption", "water total"): "      1      2",
+            ("waterstop", "valve"): "opened",
+            ("waterstop", "vacation"): "0",
+            ("consumption", "salt range"): "229",
+            ("consumption", "salt quantity"): 12,
+            ("consumption", "residual capacity"): "123, 90%",
+            ("consumption", "actual flow rate"): "0",
+            ("info", "natural hardness"): "23",
+            ("settings", "residual hardness"): 8,
+            ("settings", "regeneration"): "193, regenerate, lso, lsu",
+        }
+
+        async def read(group: str, command: str) -> str | int:
+            return responses[group, command]
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        get = AsyncMock(side_effect=read)
+        client._get = get  # noqa: SLF001
+        first = await client.async_get_data(include_extended=True)
+        self.assertEqual(first.get("natural_hardness"), 23)
+        self.assertEqual(first.get("residual_hardness"), 8)
+        self.assertTrue(first.get("regeneration") is True)
+        get.assert_any_await("info", "natural hardness")
+        get.assert_any_await("settings", "residual hardness")
+        get.assert_any_await("settings", "regeneration")
+        get.reset_mock()
+        responses["settings", "regeneration"] = "192, lso, lsu"
+        second = await client.async_get_data(include_extended=True)
+        self.assertTrue(second.get("regeneration") is False)
+        self.assertEqual(
+            second["last_success"]["natural_hardness"],
+            first["last_success"]["natural_hardness"],
+        )
+        self.assertNotIn("natural hardness", [c.args[1] for c in get.await_args_list])
+        responses["settings", "regeneration"] = "not available"
+        third = await client.async_get_data(include_extended=True)
+        self.assertTrue(third.get("regeneration") is False)
+        self.assertIn("regeneration", third["stale_fields"])
+        for frame in (
+            "999, lso",
+            "193, lso, lsu",
+            "192, regenerate, lso, lsu",
+            "192, lso, lso, lsu",
+        ):
+            with self.subTest(frame=frame):
+                responses["settings", "regeneration"] = frame
+                invalid = await client.async_get_data(include_extended=True)
+                self.assertTrue(invalid.get("regeneration") is False)
+                self.assertIn("regeneration", invalid["stale_fields"])
+                self.assertEqual(
+                    invalid["last_success"]["regeneration"],
+                    second["last_success"]["regeneration"],
+                )
+                new_client = api.JudoISoftApiClient(
+                    "judo.invalid", "test", "test", None
+                )
+                new_client._get = AsyncMock(side_effect=read)  # noqa: SLF001
+                unknown = await new_client.async_get_data(include_extended=True)
+                self.assertNotIn("regeneration", unknown)

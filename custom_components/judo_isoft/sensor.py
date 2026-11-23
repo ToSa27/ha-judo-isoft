@@ -57,6 +57,16 @@ ENTITY_DESCRIPTIONS = (
         state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorEntityDescription(
+        key="natural_hardness",
+        name="Raw Water Hardness",
+        icon="mdi:water",
+    ),
+    SensorEntityDescription(
+        key="residual_hardness",
+        name="Residual Hardness",
+        icon="mdi:water-check",
+    ),
+    SensorEntityDescription(
         key="actual_flow_rate",
         name="Actual Flow Rate",
         icon="mdi:water-pump",

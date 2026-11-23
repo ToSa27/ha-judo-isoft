@@ -44,17 +44,24 @@ class _JudoForbiddenError(JudoISoftApiClientAuthenticationError):
 
 _COUNTER_WIDTH = 7
 _PERCENT_MAX = 100
-_SALT_INTERVAL = 24 * 60 * 60
+_DAILY_INTERVAL = 24 * 60 * 60
+_REGENERATION_STATES = {
+    ("193", "regenerate", "lso", "lsu"): True,
+    ("192", "lso", "lsu"): False,
+}
 _BASE_READS = (
     ("consumption", "water total", ("water_total_raw", "water_total_soft"), 0),
     ("waterstop", "valve", ("valve",), 0),
     ("waterstop", "vacation", ("vacation",), 0),
 )
 _EXTENDED_READS = (
-    ("consumption", "salt range", ("salt_range",), _SALT_INTERVAL),
-    ("consumption", "salt quantity", ("salt_quantity",), _SALT_INTERVAL),
+    ("consumption", "salt range", ("salt_range",), _DAILY_INTERVAL),
+    ("consumption", "salt quantity", ("salt_quantity",), _DAILY_INTERVAL),
     ("consumption", "residual capacity", ("residual_capacity",), 0),
     ("consumption", "actual flow rate", ("actual_flow_rate",), 0),
+    ("info", "natural hardness", ("natural_hardness",), _DAILY_INTERVAL),
+    ("settings", "residual hardness", ("residual_hardness",), _DAILY_INTERVAL),
+    ("settings", "regeneration", ("regeneration",), 0),
 )
 _EXTENDED_COMMANDS = frozenset(
     (group, command) for group, command, _, _ in _EXTENDED_READS
@@ -152,18 +159,31 @@ class JudoISoftApiClient:
             return (value == "opened",)
         if command == "vacation" and value in ("0", "1", 0, 1):
             return (value in ("1", 1),)
-        if command in ("salt range", "salt quantity", "actual flow rate") and (
-            isinstance(value, str) or type(value) is int
+        if command in (
+            "salt range",
+            "salt quantity",
+            "actual flow rate",
+            "natural hardness",
+            "residual hardness",
         ):
-            number = int(value)
-            if number >= 0:
-                return (number,)
+            if (
+                isinstance(value, str)
+                and (digits := value.strip()).isascii()
+                and digits.isdecimal()
+            ):
+                value = int(digits)
+            if type(value) is int and value >= 0:
+                return (value,)
         if command == "residual capacity" and isinstance(value, str):
             _, separator, percent = value.partition(",")
             if separator and (percent := percent.strip()).endswith("%"):
                 percentage = int(percent[:-1])
                 if 0 <= percentage <= _PERCENT_MAX:
                     return (percentage,)
+        if command == "regeneration" and isinstance(value, str):
+            parts = tuple(part.strip() for part in value.split(","))
+            if parts in _REGENERATION_STATES:
+                return (_REGENERATION_STATES[parts],)
         msg = "Unrecognized JUDO measurement"
         raise ValueError(msg)
 
