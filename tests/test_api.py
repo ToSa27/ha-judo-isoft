@@ -8,9 +8,11 @@ import asyncio
 import importlib
 import sys
 import unittest
+from datetime import date
+from http import HTTPStatus
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
@@ -204,3 +206,237 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(api.JudoISoftApiClientCommunicationError):
                 await client._submit(f"http://127.0.0.1:{port}/")  # noqa: SLF001
         self.assertEqual(received, 1)
+
+    async def test_extended_consumption_reads_respect_cadence(self) -> None:
+        """Read the four additional metrics and retain daily samples between polls."""
+        responses = {
+            "water total": "      1      2",
+            "valve": "opened",
+            "vacation": "0",
+            "salt range": "229",
+            "salt quantity": 12,
+            "residual capacity": "123, 90%",
+            "actual flow rate": "0",
+            "natural hardness": "23",
+            "residual hardness": "8",
+            "regeneration": "192, lso, lsu",
+        }
+
+        async def read(_group: str, command: str) -> str | int:
+            return responses[command]
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        get = AsyncMock(side_effect=read)
+        client._get = get  # noqa: SLF001
+        with patch.object(api, "perf_counter", return_value=10) as clock:
+            first = await client.async_get_data(include_extended=True)
+            self.assertEqual(get.await_count, 10)
+            self.assertEqual(first["salt_range"], 229)
+            self.assertEqual(first["salt_quantity"], 12)
+            self.assertEqual(first["residual_capacity"], 90)
+            self.assertEqual(first["actual_flow_rate"], 0)
+            get.reset_mock()
+            clock.return_value += 3601
+            second = await client.async_get_data(include_extended=True)
+            self.assertEqual(
+                [c.args[1] for c in get.await_args_list],
+                [
+                    "water total",
+                    "valve",
+                    "vacation",
+                    "residual capacity",
+                    "actual flow rate",
+                    "regeneration",
+                ],
+            )
+            self.assertEqual(
+                first["last_success"]["salt_range"],
+                second["last_success"]["salt_range"],
+            )
+            self.assertNotIn("salt_range", second["stale_fields"])
+            get.reset_mock()
+            clock.return_value += 86400
+            responses["salt range"] = "unavailable"
+            third = await client.async_get_data(include_extended=True)
+            self.assertEqual(get.await_count, 10)
+            self.assertEqual(third["salt_range"], 229)
+            self.assertIn("salt_range", third["stale_fields"])
+            clock.return_value += 3601
+            fourth = await client.async_get_data(include_extended=True)
+            self.assertIn("salt_range", fourth["stale_fields"])
+
+    async def test_optional_http_denial_does_not_discard_fresh_values(self) -> None:
+        """A denied extra read must not cause reauthentication or lose other data."""
+        payloads = [
+            {"status": "ok", "token": "first"},
+            {"status": "ok", "data": [{"wtuType": "test", "serial number": 1}]},
+            {"status": "ok"},
+            {"status": "ok", "data": "      1      2"},
+            {"status": "ok", "data": "opened"},
+            {"status": "ok", "data": "0"},
+            HTTPStatus.FORBIDDEN,
+            {"status": "ok", "data": "12"},
+            {"status": "ok", "data": "123, 90%"},
+            {"status": "ok", "data": "0"},
+            {"status": "ok", "data": "23"},
+            {"status": "ok", "data": "8"},
+            {"status": "ok", "data": "192, lso, lsu"},
+        ]
+        session = MagicMock()
+        responses = []
+        for payload in payloads:
+            request = MagicMock()
+            response = request.__aenter__.return_value
+            response.status = (
+                HTTPStatus.FORBIDDEN
+                if payload == HTTPStatus.FORBIDDEN
+                else HTTPStatus.OK
+            )
+            response.raise_for_status = MagicMock()
+            response.json = AsyncMock(return_value=payload)
+            responses.append(request)
+        session.get.side_effect = responses
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", session)
+        snapshot = await client.async_get_data(include_extended=True)
+        self.assertEqual(snapshot["water_total_soft"], 2)
+        self.assertNotIn("salt_range", snapshot)
+        self.assertEqual(snapshot["salt_quantity"], 12)
+        self.assertEqual(snapshot["residual_capacity"], 90)
+        self.assertEqual(snapshot["actual_flow_rate"], 0)
+        self.assertEqual(session.get.call_count, len(payloads))
+
+    async def test_read_only_hardness_and_regeneration(self) -> None:
+        """Use the firmware's read commands and decode its regeneration frames."""
+        responses = {
+            ("consumption", "water total"): "      1      2",
+            ("waterstop", "valve"): "opened",
+            ("waterstop", "vacation"): "0",
+            ("consumption", "salt range"): "229",
+            ("consumption", "salt quantity"): 12,
+            ("consumption", "residual capacity"): "123, 90%",
+            ("consumption", "actual flow rate"): "0",
+            ("info", "natural hardness"): "23",
+            ("settings", "residual hardness"): 8,
+            ("settings", "regeneration"): "193, regenerate, lso, lsu",
+        }
+
+        async def read(group: str, command: str) -> str | int:
+            return responses[group, command]
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        get = AsyncMock(side_effect=read)
+        client._get = get  # noqa: SLF001
+        first = await client.async_get_data(include_extended=True)
+        self.assertEqual(first.get("natural_hardness"), 23)
+        self.assertEqual(first.get("residual_hardness"), 8)
+        self.assertTrue(first.get("regeneration") is True)
+        get.assert_any_await("info", "natural hardness")
+        get.assert_any_await("settings", "residual hardness")
+        get.assert_any_await("settings", "regeneration")
+        get.reset_mock()
+        responses["settings", "regeneration"] = "192, lso, lsu"
+        second = await client.async_get_data(include_extended=True)
+        self.assertTrue(second.get("regeneration") is False)
+        self.assertEqual(
+            second["last_success"]["natural_hardness"],
+            first["last_success"]["natural_hardness"],
+        )
+        self.assertNotIn("natural hardness", [c.args[1] for c in get.await_args_list])
+        responses["settings", "regeneration"] = "not available"
+        third = await client.async_get_data(include_extended=True)
+        self.assertTrue(third.get("regeneration") is False)
+        self.assertIn("regeneration", third["stale_fields"])
+        for frame in (
+            "999, lso",
+            "193, lso, lsu",
+            "192, regenerate, lso, lsu",
+            "192, lso, lso, lsu",
+        ):
+            with self.subTest(frame=frame):
+                responses["settings", "regeneration"] = frame
+                invalid = await client.async_get_data(include_extended=True)
+                self.assertTrue(invalid.get("regeneration") is False)
+                self.assertIn("regeneration", invalid["stale_fields"])
+                self.assertEqual(
+                    invalid["last_success"]["regeneration"],
+                    second["last_success"]["regeneration"],
+                )
+                new_client = api.JudoISoftApiClient(
+                    "judo.invalid", "test", "test", None
+                )
+                new_client._get = AsyncMock(side_effect=read)  # noqa: SLF001
+                unknown = await new_client.async_get_data(include_extended=True)
+                self.assertNotIn("regeneration", unknown)
+
+    async def test_calendar_consumption_buckets(self) -> None:
+        """Sum verified day/month bucket layouts, without reusing a previous period."""
+        daily = "10 11 12 -1 0 -1 -1 -1"
+        monthly = " ".join(["33", "0", *(["-1"] * 26)])
+        responses = {
+            "water total": "      1      2",
+            "valve": "opened",
+            "vacation": "0",
+        }
+
+        async def read(_group: str, command: str, _params: dict | None = None) -> str:
+            return {"water daily": daily, "water monthly": monthly}.get(
+                command, responses.get(command, "unavailable")
+            )
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        get = AsyncMock(side_effect=read)
+        client._get = get  # noqa: SLF001
+        first = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 2, 2)
+        )
+        self.assertEqual(first["water_today"], 33)
+        self.assertEqual(first["water_this_month"], 33)
+        get.assert_any_await(
+            "consumption", "water daily", {"year": 2026, "month": 2, "day": 2}
+        )
+        get.assert_any_await("consumption", "water monthly", {"year": 2026, "month": 2})
+
+        daily = "-1 -1 -1 -1 -1 -1 -1 -1"
+        monthly = "unexpected"
+        next_day = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 2, 3)
+        )
+        self.assertNotIn("water_today", next_day)
+        self.assertEqual(next_day["water_this_month"], 33)
+        self.assertIn("water_this_month", next_day["stale_fields"])
+        next_month = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 3, 1)
+        )
+        self.assertNotIn("water_this_month", next_month)
+
+        daily = "0 -1 -1 -1 -1 -1 -1 -1"
+        monthly = "0 " * 30  # Not a valid 31-day March reply.
+        final = await client.async_get_data(
+            include_extended=True, local_date=lambda: date(2026, 3, 1)
+        )
+        self.assertEqual(final["water_today"], 0)
+        self.assertNotIn("water_this_month", final)
+
+    async def test_consumption_poll_crossing_month_boundary(self) -> None:
+        """Do not publish old period totals when midnight passes mid-poll."""
+        before, after = date(2026, 2, 28), date(2026, 3, 1)
+        today = before
+        reads = {"water total": "      1      2", "valve": "opened", "vacation": "0"}
+
+        async def read(_group: str, command: str, _params: dict | None = None) -> str:
+            nonlocal today
+            if command == "water daily":
+                return "1 2 3 4 5 6 7 8"
+            if command == "water monthly":
+                today = after
+                return "1 " * 28
+            return reads.get(command, "unavailable")
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        client._get = AsyncMock(side_effect=read)  # noqa: SLF001
+        snapshot = await client.async_get_data(
+            include_extended=True, local_date=lambda: today
+        )
+        self.assertNotIn("water_today", snapshot)
+        self.assertNotIn("water_this_month", snapshot)
+        self.assertEqual(snapshot["water_total_soft"], 2)

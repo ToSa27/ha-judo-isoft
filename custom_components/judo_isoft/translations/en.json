@@ -2,7 +2,7 @@
     "config": {
         "step": {
             "user": {
-                "description": "If you need help with the configuration have a look here: https://github.com/ToSa27/ha-judo-isoft",
+                "description": "Enter the local IP address and credentials for your JUDO device.",
                 "data": {
                     "ip_address": "IP Address",
                     "username": "Username",
