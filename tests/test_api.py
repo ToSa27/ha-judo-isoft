@@ -8,9 +8,10 @@ import asyncio
 import importlib
 import sys
 import unittest
+from http import HTTPStatus
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
@@ -204,3 +205,94 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(api.JudoISoftApiClientCommunicationError):
                 await client._submit(f"http://127.0.0.1:{port}/")  # noqa: SLF001
         self.assertEqual(received, 1)
+
+    async def test_extended_consumption_reads_respect_cadence(self) -> None:
+        """Read the four additional metrics and retain daily samples between polls."""
+        responses = {
+            "water total": "      1      2",
+            "valve": "opened",
+            "vacation": "0",
+            "salt range": "229",
+            "salt quantity": 12,
+            "residual capacity": "123, 90%",
+            "actual flow rate": "0",
+        }
+
+        async def read(_group: str, command: str) -> str | int:
+            return responses[command]
+
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", None)
+        get = AsyncMock(side_effect=read)
+        client._get = get  # noqa: SLF001
+        with patch.object(api, "perf_counter", return_value=10) as clock:
+            first = await client.async_get_data(include_extended=True)
+            self.assertEqual(get.await_count, 7)
+            self.assertEqual(first["salt_range"], 229)
+            self.assertEqual(first["salt_quantity"], 12)
+            self.assertEqual(first["residual_capacity"], 90)
+            self.assertEqual(first["actual_flow_rate"], 0)
+            get.reset_mock()
+            clock.return_value += 3601
+            second = await client.async_get_data(include_extended=True)
+            self.assertEqual(
+                [c.args[1] for c in get.await_args_list],
+                [
+                    "water total",
+                    "valve",
+                    "vacation",
+                    "residual capacity",
+                    "actual flow rate",
+                ],
+            )
+            self.assertEqual(
+                first["last_success"]["salt_range"],
+                second["last_success"]["salt_range"],
+            )
+            self.assertNotIn("salt_range", second["stale_fields"])
+            get.reset_mock()
+            clock.return_value += 86400
+            responses["salt range"] = "unavailable"
+            third = await client.async_get_data(include_extended=True)
+            self.assertEqual(get.await_count, 7)
+            self.assertEqual(third["salt_range"], 229)
+            self.assertIn("salt_range", third["stale_fields"])
+            clock.return_value += 3601
+            fourth = await client.async_get_data(include_extended=True)
+            self.assertIn("salt_range", fourth["stale_fields"])
+
+    async def test_optional_http_denial_does_not_discard_fresh_values(self) -> None:
+        """A denied extra read must not cause reauthentication or lose other data."""
+        payloads = [
+            {"status": "ok", "token": "first"},
+            {"status": "ok", "data": [{"wtuType": "test", "serial number": 1}]},
+            {"status": "ok"},
+            {"status": "ok", "data": "      1      2"},
+            {"status": "ok", "data": "opened"},
+            {"status": "ok", "data": "0"},
+            HTTPStatus.FORBIDDEN,
+            {"status": "ok", "data": "12"},
+            {"status": "ok", "data": "123, 90%"},
+            {"status": "ok", "data": "0"},
+        ]
+        session = MagicMock()
+        responses = []
+        for payload in payloads:
+            request = MagicMock()
+            response = request.__aenter__.return_value
+            response.status = (
+                HTTPStatus.FORBIDDEN
+                if payload == HTTPStatus.FORBIDDEN
+                else HTTPStatus.OK
+            )
+            response.raise_for_status = MagicMock()
+            response.json = AsyncMock(return_value=payload)
+            responses.append(request)
+        session.get.side_effect = responses
+        client = api.JudoISoftApiClient("judo.invalid", "test", "test", session)
+        snapshot = await client.async_get_data(include_extended=True)
+        self.assertEqual(snapshot["water_total_soft"], 2)
+        self.assertNotIn("salt_range", snapshot)
+        self.assertEqual(snapshot["salt_quantity"], 12)
+        self.assertEqual(snapshot["residual_capacity"], 90)
+        self.assertEqual(snapshot["actual_flow_rate"], 0)
+        self.assertEqual(session.get.call_count, len(payloads))

@@ -7,12 +7,26 @@ request middleware to prevent a disconnected request from being sent again.
 
 The integration polls the legacy local HTTPS API sequentially. If an individual read
 fails, the last successful value for that entity is retained in memory. Each measured
-entity exposes `last_success` (UTC timestamp) and `stale` (true when the entity was not
-refreshed on the last poll). Check `stale` before trusting a cached state in automations.
+entity exposes `last_success` (UTC timestamp) and `stale` (true if a due read did
+not produce a valid value). A daily reading is not stale just because the current
+poll did not schedule it. Check `stale` before trusting a cached state in automations.
 A value that has never been read is unknown; the cache does not survive a restart.
 
 Timed-out requests are not immediately repeated. Debug logs report elapsed time by
 operation, not request URLs, tokens or response bodies.
+
+## Extra consumption sensors
+
+The first refresh keeps the original three requests; the extra read-only sensors
+are queried starting with the next regular refresh. Salt range and salt quantity
+are attempted at most once every 24 hours per integration load. Residual capacity
+and current flow rate are read at every regular refresh (normally hourly). A flow
+reading is a snapshot, not continuous monitoring.
+
+Residual capacity uses the percentage explicitly provided by the API. Salt range,
+salt quantity and flow rate are shown as raw integers without guessed units until
+the values can be matched to the appliance display. Firmware revisions that do not
+return a recognized value leave the sensor unknown, or stale if previously read.
 
 ## Offline tests
 

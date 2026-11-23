@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from http import HTTPStatus
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -37,16 +38,40 @@ class JudoISoftApiClientAuthenticationError(
     """Exception to indicate an authentication error."""
 
 
+class _JudoForbiddenError(JudoISoftApiClientAuthenticationError):
+    """An HTTP 403 that may be specific to a firmware command."""
+
+
 _COUNTER_WIDTH = 7
+_PERCENT_MAX = 100
+_SALT_INTERVAL = 24 * 60 * 60
+_BASE_READS = (
+    ("consumption", "water total", ("water_total_raw", "water_total_soft"), 0),
+    ("waterstop", "valve", ("valve",), 0),
+    ("waterstop", "vacation", ("vacation",), 0),
+)
+_EXTENDED_READS = (
+    ("consumption", "salt range", ("salt_range",), _SALT_INTERVAL),
+    ("consumption", "salt quantity", ("salt_quantity",), _SALT_INTERVAL),
+    ("consumption", "residual capacity", ("residual_capacity",), 0),
+    ("consumption", "actual flow rate", ("actual_flow_rate",), 0),
+)
+_EXTENDED_COMMANDS = frozenset(
+    (group, command) for group, command, _, _ in _EXTENDED_READS
+)
+MEASUREMENT_FIELDS = frozenset(
+    field for _, _, fields, _ in (*_BASE_READS, *_EXTENDED_READS) for field in fields
+)
 
 
 def _verify_response_or_raise(response: aiohttp.ClientResponse) -> None:
     """Verify that the response is valid."""
-    if response.status in (401, 403):
+    if response.status == HTTPStatus.FORBIDDEN:
+        msg = "JUDO denied the request"
+        raise _JudoForbiddenError(msg)
+    if response.status == HTTPStatus.UNAUTHORIZED:
         msg = "Invalid credentials"
-        raise JudoISoftApiClientAuthenticationError(
-            msg,
-        )
+        raise JudoISoftApiClientAuthenticationError(msg)
     response.raise_for_status()
 
 
@@ -72,15 +97,20 @@ class JudoISoftApiClient:
         self._msgnum = 0
         self._values: dict[str, int | bool] = {}
         self._last_success: dict[str, str] = {}
+        self._next_read: dict[str, float] = {}
+        self._stale_fields: set[str] = set()
 
-    async def async_get_data(self) -> dict[str, Any]:
+    async def async_get_data(self, *, include_extended: bool = False) -> dict[str, Any]:
         """Poll independently, retaining the values that could not be refreshed."""
-        fresh: set[str] = set()
-        for group, command, fields in (
-            ("consumption", "water total", ("water_total_raw", "water_total_soft")),
-            ("waterstop", "valve", ("valve",)),
-            ("waterstop", "vacation", ("vacation",)),
-        ):
+        reads = (*_BASE_READS, *_EXTENDED_READS) if include_extended else _BASE_READS
+        now = perf_counter()
+        due = [read for read in reads if now >= self._next_read.get(read[1], now)]
+        for _, _, fields, _ in due:
+            self._stale_fields.update(fields)
+
+        for group, command, fields, interval in due:
+            if interval:
+                self._next_read[command] = perf_counter() + interval
             try:
                 result = await self._get(group, command)
                 values = self._parse_values(command, result)
@@ -96,7 +126,7 @@ class JudoISoftApiClient:
             for field, value in zip(fields, values, strict=True):
                 self._values[field] = value
                 self._last_success[field] = timestamp
-                fresh.add(field)
+                self._stale_fields.discard(field)
 
         if not self._values:
             msg = "JUDO did not return any valid measurements"
@@ -107,7 +137,7 @@ class JudoISoftApiClient:
             "serial": self._serial,
             **self._values,
             "last_success": self._last_success.copy(),
-            "stale_fields": self._values.keys() - fresh,
+            "stale_fields": self._values.keys() & self._stale_fields,
         }
 
     @staticmethod
@@ -122,6 +152,18 @@ class JudoISoftApiClient:
             return (value == "opened",)
         if command == "vacation" and value in ("0", "1", 0, 1):
             return (value in ("1", 1),)
+        if command in ("salt range", "salt quantity", "actual flow rate") and (
+            isinstance(value, str) or type(value) is int
+        ):
+            number = int(value)
+            if number >= 0:
+                return (number,)
+        if command == "residual capacity" and isinstance(value, str):
+            _, separator, percent = value.partition(",")
+            if separator and (percent := percent.strip()).endswith("%"):
+                percentage = int(percent[:-1])
+                if 0 <= percentage <= _PERCENT_MAX:
+                    return (percentage,)
         msg = "Unrecognized JUDO measurement"
         raise ValueError(msg)
 
@@ -217,6 +259,12 @@ class JudoISoftApiClient:
         started = perf_counter()
         try:
             response = await self._submit(url)
+        except _JudoForbiddenError:
+            if (group, command) in _EXTENDED_COMMANDS:
+                msg = "JUDO denied this optional measurement"
+                raise JudoISoftApiClientCommunicationError(msg) from None
+            self._reset_session()
+            raise
         except JudoISoftApiClientError:
             # The firmware may still be holding the previous response for this token.
             self._reset_session()

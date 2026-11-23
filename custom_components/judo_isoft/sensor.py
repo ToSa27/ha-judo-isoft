@@ -10,7 +10,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfVolume
+from homeassistant.const import PERCENTAGE, UnitOfVolume
 
 from .entity import JudoISoftEntity
 
@@ -38,6 +38,28 @@ ENTITY_DESCRIPTIONS = (
         native_unit_of_measurement=UnitOfVolume.LITERS,
         device_class=SensorDeviceClass.WATER,
         state_class=SensorStateClass.TOTAL_INCREASING,
+    ),
+    SensorEntityDescription(
+        key="salt_range",
+        name="Salt Range",
+        icon="mdi:calendar-clock",
+    ),
+    SensorEntityDescription(
+        key="salt_quantity",
+        name="Salt Quantity",
+        icon="mdi:shaker-outline",
+    ),
+    SensorEntityDescription(
+        key="residual_capacity",
+        name="Residual Capacity",
+        icon="mdi:gauge",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="actual_flow_rate",
+        name="Actual Flow Rate",
+        icon="mdi:water-pump",
     ),
 )
 
@@ -73,6 +95,6 @@ class JudoISoftSensor(JudoISoftEntity, SensorEntity):
         )
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> int | None:
         """Return the native value of the sensor."""
         return self.coordinator.data.get(self.entity_description.key)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .api import MEASUREMENT_FIELDS
 from .const import ATTRIBUTION
 from .coordinator import JudoISoftDataUpdateCoordinator
 
@@ -31,12 +32,7 @@ class JudoISoftEntity(CoordinatorEntity[JudoISoftDataUpdateCoordinator]):
     def extra_state_attributes(self) -> dict[str, str | bool | None] | None:
         """Expose freshness for measurements without changing their state type."""
         description = self.entity_description
-        if description is None or description.key not in {
-            "water_total_raw",
-            "water_total_soft",
-            "valve",
-            "vacation",
-        }:
+        if description is None or description.key not in MEASUREMENT_FIELDS:
             return None
         data = self.coordinator.data or {}
         last_success = data.get("last_success", {}).get(description.key)

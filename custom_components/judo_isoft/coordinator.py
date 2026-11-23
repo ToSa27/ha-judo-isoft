@@ -25,7 +25,9 @@ class JudoISoftDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Any:
         """Update data via library."""
         try:
-            return await self.config_entry.runtime_data.client.async_get_data()
+            return await self.config_entry.runtime_data.client.async_get_data(
+                include_extended=self.data is not None,
+            )
         except JudoISoftApiClientAuthenticationError as exception:
             raise ConfigEntryAuthFailed(exception) from exception
         except JudoISoftApiClientError as exception:
